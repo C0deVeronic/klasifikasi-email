@@ -42,13 +42,6 @@ st.markdown("""
         color: #4B5563;
         margin-bottom: 1.5rem;
     }
-    .metric-card {
-        background-color: #F8FAFC;
-        border-radius: 10px;
-        padding: 15px;
-        border-left: 5px solid #2563EB;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,7 +90,7 @@ def load_data_and_train():
             break
             
     if file_path is None:
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
     # Load file
     try:
@@ -158,10 +151,29 @@ def load_data_and_train():
             'tpr': tpr
         }
         
-    return df, tfidf, trained_models, eval_metrics, X_test, y_test
+    # Analisis Rasio Peluang Log (Log-Likelihood Ratio) untuk Multinomial Naïve Bayes
+    mnb = trained_models["Multinomial Naïve Bayes"]
+    feature_names = np.array(tfidf.get_feature_names_out())
+    # log P(w | Spam) - log P(w | Ham)
+    log_odds = mnb.feature_log_prob_[1] - mnb.feature_log_prob_[0]
+    
+    top_spam_idx = np.argsort(log_odds)[-10:]
+    top_ham_idx = np.argsort(log_odds)[:10]
+    
+    top_spam_df = pd.DataFrame({
+        'Kata/Fitur': feature_names[top_spam_idx],
+        'Log-Odds Ratio': log_odds[top_spam_idx]
+    }).sort_values('Log-Odds Ratio', ascending=True)
+    
+    top_ham_df = pd.DataFrame({
+        'Kata/Fitur': feature_names[top_ham_idx],
+        'Log-Odds Ratio (Ham)': np.abs(log_odds[top_ham_idx])
+    }).sort_values('Log-Odds Ratio (Ham)', ascending=True)
+        
+    return df, tfidf, trained_models, eval_metrics, X_test, y_test, top_spam_df, top_ham_df
 
 # Load data dan model
-df, tfidf, models, metrics, X_test, y_test = load_data_and_train()
+df, tfidf, models, metrics, X_test, y_test, top_spam_df, top_ham_df = load_data_and_train()
 
 # ==========================================
 # SIDEBAR
@@ -188,7 +200,7 @@ with st.sidebar:
     **Mata Kuliah:**  
     📚 Statistika dan Probabilitas (Statpro)  
     
-    **Topik:**  
+    **Topik Utama:**  
     * Teorema Bayes (Bayes' Theorem)
     * Probabilitas Bersyarat & Log-Odds
     * Evaluasi Metrik Data Tidak Seimbang
@@ -205,80 +217,139 @@ if df is None:
     st.stop()
 
 # Buat Tab Navigasi
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "🔍 Uji Coba & Prediksi Pesan",
     "📊 Analisis Dataset & Statistik (EDA)",
-    "📈 Evaluasi & Perbandingan Model",
-    "📖 Landasan Teori Probabilitas"
+    "📈 Evaluasi & Perbandingan Model"
 ])
 
 # ------------------------------------------
 # TAB 1: PREDIKSI INTERAKTIF
 # ------------------------------------------
 with tab1:
-    st.subheader("Tes Pesan Email / SMS")
-    st.write("Masukkan teks pesan di bawah ini untuk melihat apakah sistem mengklasifikasikannya sebagai **Spam** atau **Ham** (bukan spam).")
+    sub_tab_single, sub_tab_batch = st.tabs(["📝 Prediksi Satu Pesan", "📂 Unggah File CSV (Batch Testing)"])
     
-    # Tombol Contoh Cepat
-    col_demo1, col_demo2, col_demo3 = st.columns(3)
-    sample_text = ""
-    if col_demo1.button("📩 Contoh 1: Pesan Hadiah (Spam)"):
-        sample_text = "WINNER!! As a valued network customer you have been selected to receive a £900 prize reward! Claim code KL341. Valid 12 hours only. Call 09061701461 now!"
-    if col_demo2.button("💬 Contoh 2: Pesan Kuliah (Ham)"):
-        sample_text = "Hi mate, don't forget we have a group presentation for the Probability and Statistics class tomorrow morning at 10 AM. See you in class!"
-    if col_demo3.button("⚠️ Contoh 3: Promo / Phishing (Spam)"):
-        sample_text = "URGENT! Your mobile account balance is credited with £500 bonus. Click http://claim-gift.now to claim before it expires today!"
+    with sub_tab_single:
+        st.write("Masukkan teks pesan di bawah ini untuk melihat apakah sistem mengklasifikasikannya sebagai **Spam** atau **Ham** (bukan spam).")
+        
+        # Inisialisasi session state untuk input teks
+        if "input_message" not in st.session_state:
+            st.session_state.input_message = "WINNER!! As a valued network customer you have been selected to receive a £900 prize reward! Claim code KL341. Valid 12 hours only. Call 09061701461 now!"
 
-    user_input = st.text_area(
-        "Isi Pesan / Email:",
-        value=sample_text,
-        height=140,
-        placeholder="Ketik atau tempel teks email/pesan di sini..."
-    )
+        def set_sample_text(text):
+            st.session_state.input_message = text
 
-    col_btn, col_info = st.columns([1, 4])
-    with col_btn:
-        predict_clicked = st.button("🚀 Prediksi Sekarang", type="primary", use_container_width=True)
+        # Tombol Contoh Cepat
+        col_demo1, col_demo2, col_demo3 = st.columns(3)
+        col_demo1.button(
+            "📩 Contoh 1: Pesan Hadiah (Spam)",
+            on_click=set_sample_text,
+            args=("WINNER!! As a valued network customer you have been selected to receive a £900 prize reward! Claim code KL341. Valid 12 hours only. Call 09061701461 now!",),
+            use_container_width=True
+        )
+        col_demo2.button(
+            "💬 Contoh 2: Pesan Kuliah (Ham)",
+            on_click=set_sample_text,
+            args=("Hi mate, don't forget we have a group presentation for the Probability and Statistics class tomorrow morning at 10 AM. See you in class!",),
+            use_container_width=True
+        )
+        col_demo3.button(
+            "⚠️ Contoh 3: Promo / Phishing (Spam)",
+            on_click=set_sample_text,
+            args=("URGENT! Your mobile account balance is credited with £500 bonus. Click http://claim-gift.now to claim before it expires today!",),
+            use_container_width=True
+        )
 
-    if predict_clicked and user_input.strip() != "":
-        # Preprocessing & Prediksi
-        cleaned_input = clean_text(user_input)
-        input_vec = tfidf.transform([cleaned_input]).toarray()
-        
-        active_model = models[selected_model_name]
-        pred = active_model.predict(input_vec)[0]
-        prob = active_model.predict_proba(input_vec)[0]
-        
-        prob_ham = prob[0] * 100
-        prob_spam = prob[1] * 100
-        
-        st.markdown("---")
-        st.subheader("🎯 Hasil Analisis Probabilitas")
-        
-        col_res1, col_res2 = st.columns([1, 1])
-        
-        with col_res1:
-            if pred == 1:
-                st.error("### 🚨 TERDETEKSI: SPAM")
-                st.markdown(f"Model **{selected_model_name}** mengidentifikasi pesan ini sebagai pesan **SPAM / Penipuan**.")
+        user_input = st.text_area(
+            "Isi Pesan / Email:",
+            key="input_message",
+            height=130,
+            placeholder="Ketik atau tempel teks email/pesan di sini..."
+        )
+
+        col_btn, col_info = st.columns([1, 4])
+        with col_btn:
+            predict_clicked = st.button("🚀 Prediksi Sekarang", type="primary", use_container_width=True)
+
+        if predict_clicked:
+            if not user_input or user_input.strip() == "":
+                st.warning("⚠️ Mohon masukkan teks pesan terlebih dahulu sebelum menekan tombol prediksi.")
             else:
-                st.success("### ✅ TERDETEKSI: HAM (BUKAN SPAM)")
-                st.markdown(f"Model **{selected_model_name}** mengidentifikasi pesan ini sebagai pesan **NORMAL / VALID**.")
+                # Preprocessing & Prediksi
+                cleaned_input = clean_text(user_input)
+                input_vec = tfidf.transform([cleaned_input]).toarray()
                 
-            st.write(f"**Tingkat Keyakinan (Posterior Probability):**")
-            st.progress(int(prob_spam))
-            st.markdown(f"- Peluang **Ham** : `{prob_ham:.2f}%`\n- Peluang **Spam**: `{prob_spam:.2f}%`")
-            
-        with col_res2:
-            st.info("💡 **Hasil Pemrosesan Teks (Preprocessed):**")
-            st.caption("Teks asli setelah diubah ke huruf kecil, dibersihkan dari simbol/URL/angka, dihapus stop words, dan di-stem:")
-            st.code(cleaned_input if cleaned_input != "" else "(Semua kata tereliminasi sebagai stop words)", language="text")
-            
-            # Kata kunci pembeda yang terdeteksi
-            detected_features = [word for word in cleaned_input.split() if word in tfidf.vocabulary_]
-            if detected_features:
-                st.write(f"Kata kunci terdeteksi dalam model vocab ({len(detected_features)}):")
-                st.write(", ".join([f"`{w}`" for w in set(detected_features)]))
+                active_model = models[selected_model_name]
+                pred = active_model.predict(input_vec)[0]
+                prob = active_model.predict_proba(input_vec)[0]
+                
+                prob_ham = prob[0] * 100
+                prob_spam = prob[1] * 100
+                
+                st.markdown("---")
+                st.subheader("🎯 Hasil Analisis Probabilitas")
+                
+                col_res1, col_res2 = st.columns([1, 1])
+                
+                with col_res1:
+                    if pred == 1:
+                        st.error("### 🚨 TERDETEKSI: SPAM")
+                        st.markdown(f"Model **{selected_model_name}** mengidentifikasi pesan ini sebagai pesan **SPAM / Penipuan**.")
+                    else:
+                        st.success("### ✅ TERDETEKSI: HAM (BUKAN SPAM)")
+                        st.markdown(f"Model **{selected_model_name}** mengidentifikasi pesan ini sebagai pesan **NORMAL / VALID**.")
+                        
+                    st.write(f"**Tingkat Keyakinan (Posterior Probability):**")
+                    progress_val = min(max(int(prob_spam), 0), 100)
+                    st.progress(progress_val)
+                    st.markdown(f"- Peluang **Ham** : `{prob_ham:.2f}%`\n- Peluang **Spam**: `{prob_spam:.2f}%`")
+                    
+                with col_res2:
+                    st.info("💡 **Hasil Pemrosesan Teks (Preprocessed):**")
+                    st.caption("Teks setelah diubah ke huruf kecil, dibersihkan dari simbol/URL/angka, dihapus stop words, dan di-stem:")
+                    st.code(cleaned_input if cleaned_input != "" else "(Semua kata tereliminasi sebagai stop words)", language="text")
+                    
+                    detected_features = [word for word in cleaned_input.split() if word in tfidf.vocabulary_]
+                    if detected_features:
+                        st.write(f"Kata kunci terdeteksi dalam model vocab ({len(detected_features)}):")
+                        st.write(", ".join([f"`{w}`" for w in set(detected_features)]))
+
+    with sub_tab_batch:
+        st.write("Unggah file CSV yang memuat daftar pesan untuk diprediksi secara massal.")
+        uploaded_file = st.file_uploader("Pilih file CSV:", type=["csv"])
+        
+        if uploaded_file is not None:
+            try:
+                batch_df = pd.read_csv(uploaded_file)
+                st.write("Pratinjau Data Unggahan:")
+                st.dataframe(batch_df.head(5), use_container_width=True)
+                
+                text_col = st.selectbox("Pilih kolom teks pesan:", batch_df.columns)
+                
+                if st.button("⚡ Proses Klasifikasi Massal", type="primary"):
+                    with st.spinner("Sedang memproses seluruh pesan..."):
+                        active_model = models[selected_model_name]
+                        cleaned_batch = batch_df[text_col].apply(clean_text)
+                        batch_vec = tfidf.transform(cleaned_batch).toarray()
+                        
+                        batch_preds = active_model.predict(batch_vec)
+                        batch_probs = active_model.predict_proba(batch_vec)[:, 1]
+                        
+                        batch_df['Hasil_Prediksi'] = ['SPAM' if p == 1 else 'HAM' for p in batch_preds]
+                        batch_df['Probabilitas_Spam (%)'] = np.round(batch_probs * 100, 2)
+                        
+                        st.success(f"Berhasil memproses {len(batch_df)} pesan!")
+                        st.dataframe(batch_df, use_container_width=True)
+                        
+                        csv_data = batch_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Unduh Hasil Klasifikasi (.CSV)",
+                            data=csv_data,
+                            file_name="hasil_klasifikasi_spam.csv",
+                            mime="text/csv"
+                        )
+            except Exception as e:
+                st.error(f"Terjadi kesalahan membaca file CSV: {e}")
 
 # ------------------------------------------
 # TAB 2: EXPLORATORY DATA ANALYSIS (EDA)
@@ -323,10 +394,28 @@ with tab2:
         ax_len.legend()
         st.pyplot(fig_len)
         
+    st.markdown("---")
+    st.markdown("##### 🔑 Kata-Kata Kunci Paling Berpengaruh (Berdasarkan Bayesian Log-Odds Ratio)")
+    
+    col_word1, col_word2 = st.columns(2)
+    with col_word1:
+        st.markdown("**10 Kata Paling Mengindikasikan SPAM:**")
+        fig_w1, ax_w1 = plt.subplots(figsize=(6, 4))
+        ax_w1.barh(top_spam_df['Kata/Fitur'], top_spam_df['Log-Odds Ratio'], color='#DC2626')
+        ax_w1.set_xlabel("Log-Odds Ratio (Spam vs Ham)")
+        st.pyplot(fig_w1)
+        
+    with col_word2:
+        st.markdown("**10 Kata Paling Mengindikasikan HAM:**")
+        fig_w2, ax_w2 = plt.subplots(figsize=(6, 4))
+        ax_w2.barh(top_ham_df['Kata/Fitur'], top_ham_df['Log-Odds Ratio (Ham)'], color='#2563EB')
+        ax_w2.set_xlabel("Log-Odds Ratio (Ham vs Spam)")
+        st.pyplot(fig_w2)
+        
     st.info("""
     **Insight Statistika:**  
-    - Dataset mengalami **Class Imbalance** yang signifikan (~87% ham vs ~13% spam).
-    - Pesan **Spam** memiliki rata-rata panjang karakter yang jauh lebih tinggi dan konsisten (~140-160 karakter), sedangkan pesan **Ham** cenderung jauh lebih pendek dan variatif.
+    - Kata-kata seperti *'claim', 'prize', 'won', 'urgent'* memiliki rasio kemungkinan (*Likelihood Ratio*) yang ekstrem pada kelas Spam.
+    - Sebaliknya, kata-kata percakapan sehari-hari seperti *'later', 'lor', 'say', 'come'* mendominasi kelas Ham.
     """)
     
     with st.expander("🔍 Pratinjau Sampel Data Mentah"):
@@ -384,35 +473,6 @@ with tab3:
     > Pada sistem filter spam, **Precision** tinggi sangat krusial untuk mencegah terjadinya *False Positive* (pesan penting keliru dibuang ke folder spam). Model **Multinomial Naïve Bayes** menunjukkan tingkat *Precision* yang luar biasa tinggi pada kasus ini.
     """)
 
-# ------------------------------------------
-# TAB 4: LANDASAN TEORI BAYES
-# ------------------------------------------
-with tab4:
-    st.subheader("📖 Teorema Bayes dalam Klasifikasi Teks")
-    st.markdown(r"""
-    ### 1. Rumus Dasar Teorema Bayes
-    Teorema Bayes menyatakan hubungan antara probabilitas bersyarat dari dua kejadian acak:
-    
-    $$P(C \mid \mathbf{x}) = \frac{P(\mathbf{x} \mid C) \cdot P(C)}{P(\mathbf{x})}$$
-    
-    Dalam konteks klasifikasi email spam:
-    * $P(C \mid \mathbf{x})$: **Posterior Probability**, yaitu peluang sebuah email masuk ke kelas $C \in \{\text{Spam}, \text{Ham}\}$ setelah membaca sekumpulan kata $\mathbf{x} = (x_1, x_2, \dots, x_n)$.
-    * $P(C)$: **Prior Probability**, yaitu frekuensi proporsi kemunculan masing-masing kelas dalam dataset.
-    * $P(\mathbf{x} \mid C)$: **Likelihood**, yaitu peluang sekumpulan kata $\mathbf{x}$ muncul jika pesan tersebut adalah kelas $C$.
-    * $P(\mathbf{x})$: **Evidence**, faktor normalisasi probabilitas konstan.
-
-    ---
-    ### 2. Asumsi Naïve (Conditional Independence)
-    Kata *"Naïve"* berasal dari asumsi bahwa setiap fitur kata $x_i$ saling bebas (*independen*) terhadap kata lainnya jika diberikan kelas $C$:
-    
-    $$P(\mathbf{x} \mid C) = \prod_{i=1}^n P(x_i \mid C)$$
-    
-    ### 3. Laplace Smoothing
-    Untuk menghindari nilai probabilitas bernilai $0$ pada kata baru yang belum pernah muncul pada kelas tertentu saat *training*, diterapkan **Laplace Smoothing** ($\alpha = 1$):
-    
-    $$\hat{P}(x_i \mid C) = \frac{N_{x_i, C} + \alpha}{N_C + \alpha \cdot |V|}$$
-    """)
 
 st.markdown("---")
 st.caption("Aplikasi Dibuat untuk Tugas Kuliah Statistika dan Probabilitas (Statpro) • Powered by Streamlit & Scikit-Learn")
-
